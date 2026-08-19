@@ -266,7 +266,7 @@ h2 { font-size: clamp(38px, 5vw, 70px); line-height: .95; }
 .filter-button b { margin-left: 5px; color: var(--purple); }
 .result-count { min-width: 66px; text-align: right; color: var(--muted); font: 800 11px/1 ui-monospace, monospace; }
 .fighter-grid { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 13px; }
-.fighter-card { border: 3px solid var(--line); border-radius: 13px 16px 12px 15px; background: rgba(255, 253, 245, .78); box-shadow: 3px 4px 0 var(--line); overflow: hidden; transition: transform .15s ease, box-shadow .15s ease; }
+.fighter-card { border: 3px solid var(--line); border-radius: 13px 16px 12px 15px; background: rgba(255, 253, 245, .78); box-shadow: 3px 4px 0 var(--line); overflow: hidden; transition: transform .15s ease, box-shadow .15s ease; content-visibility: auto; contain-intrinsic-size: 0 210px; }
 .fighter-card:nth-child(4n + 2) { transform: rotate(.25deg); }
 .fighter-card:nth-child(5n + 3) { transform: rotate(-.22deg); }
 .fighter-card:hover { transform: translateY(-2px); box-shadow: 5px 6px 0 var(--line); }

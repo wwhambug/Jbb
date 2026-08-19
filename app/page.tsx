@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { memo, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { drawBattle } from "./game/draw";
 import {
   createBattle,
@@ -43,7 +43,7 @@ function getSnapshot(state: BattleState): BattleState {
   };
 }
 
-function FighterCard({
+const FighterCard = memo(function FighterCard({
   fighterId,
   selected,
   onToggle,
@@ -81,15 +81,16 @@ function FighterCard({
       </div>
     </article>
   );
-}
+});
 
 export default function Home() {
   const canvasRef = useRef<HTMLCanvasElement | null>(null);
-  const battleRef = useRef<BattleState>(createBattle("JBB-2026", DEFAULT_PICKS));
+  const [initialBattle] = useState(() => createBattle("JBB-2026", DEFAULT_PICKS));
+  const battleRef = useRef<BattleState>(initialBattle);
   const [seed, setSeed] = useState("JBB-2026");
   const [picks, setPicks] = useState<RosterPick[]>(DEFAULT_PICKS);
   const [battleConfig, setBattleConfig] = useState<BattleConfig>({ seed: "JBB-2026", picks: DEFAULT_PICKS, version: 0 });
-  const [snapshot, setSnapshot] = useState<BattleState>(() => getSnapshot(createBattle("JBB-2026", DEFAULT_PICKS)));
+  const [snapshot, setSnapshot] = useState<BattleState>(() => getSnapshot(initialBattle));
   const [paused, setPaused] = useState(false);
   const [speed, setSpeed] = useState(1);
   const [query, setQuery] = useState("");
@@ -175,7 +176,7 @@ export default function Home() {
     return () => window.removeEventListener("keydown", onKeyDown);
   }, [startBattle]);
 
-  const toggleFighter = (fighterId: string) => {
+  const toggleFighter = useCallback((fighterId: string) => {
     setNotice("");
     setPicks((current) => {
       if (current.some((pick) => pick.fighterId === fighterId)) return current.filter((pick) => pick.fighterId !== fighterId);
@@ -185,7 +186,7 @@ export default function Home() {
       }
       return [...current, { fighterId, variant: "classic" }];
     });
-  };
+  }, []);
 
   const setVariant = (fighterId: string, variant: VariantId) => {
     setPicks((current) => current.map((pick) => (pick.fighterId === fighterId ? { ...pick, variant } : pick)));

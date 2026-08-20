@@ -1,4 +1,5 @@
 import { FIGHTER_BY_ID, VARIANTS } from "./roster";
+import { drawPixelMatrix, getPixelStyle } from "./pixel-art";
 import type { BattleState, FighterState } from "./types";
 
 function roundedRect(
@@ -125,6 +126,79 @@ function drawStatusRings(ctx: CanvasRenderingContext2D, fighter: FighterState) {
   ctx.setLineDash([]);
 }
 
+function drawVariantPixels(ctx: CanvasRenderingContext2D, fighter: FighterState, step: number) {
+  const color = fighter.variant === "flame"
+    ? "#f97316"
+    : fighter.variant === "frost"
+      ? "#38bdf8"
+      : fighter.variant === "supercharged"
+        ? "#a855f7"
+        : fighter.variant === "swift"
+          ? "#22c55e"
+          : fighter.variant === "titan"
+            ? "#facc15"
+            : null;
+  if (!color) return;
+  ctx.save();
+  ctx.fillStyle = color;
+  ctx.globalAlpha = 0.72;
+  const count = fighter.variant === "titan" ? 5 : 7;
+  for (let index = 0; index < count; index += 1) {
+    const angle = step * (fighter.variant === "swift" ? 0.11 : 0.045) + index * (Math.PI * 2 / count);
+    const orbit = fighter.radius + 6 + (index % 2) * 3;
+    const size = fighter.variant === "titan" ? 3 : 2;
+    ctx.fillRect(
+      Math.round(fighter.x + Math.cos(angle) * orbit - size / 2),
+      Math.round(fighter.y + Math.sin(angle) * orbit - size / 2),
+      size,
+      size,
+    );
+  }
+  ctx.restore();
+}
+
+function drawWeapon(ctx: CanvasRenderingContext2D, fighter: FighterState, step: number) {
+  if (!fighter.alive) return;
+  const style = getPixelStyle(fighter.templateId);
+  const orbit = fighter.radius + fighter.weaponReach;
+  const weaponX = fighter.x + Math.cos(fighter.weaponAngle) * orbit;
+  const weaponY = fighter.y + Math.sin(fighter.weaponAngle) * orbit;
+  const growthScale = fighter.weaponHits >= 18 ? 3 : 2;
+
+  ctx.save();
+  ctx.strokeStyle = style.accent2;
+  ctx.globalAlpha = 0.18 + Math.min(0.28, fighter.weaponHits * 0.012);
+  ctx.lineWidth = 2;
+  ctx.setLineDash([3, 5]);
+  ctx.beginPath();
+  ctx.arc(fighter.x, fighter.y, orbit, fighter.weaponAngle - 0.72, fighter.weaponAngle);
+  ctx.stroke();
+  ctx.setLineDash([]);
+  ctx.globalAlpha = 0.34;
+  ctx.beginPath();
+  ctx.moveTo(fighter.x, fighter.y);
+  ctx.lineTo(weaponX, weaponY);
+  ctx.stroke();
+  ctx.globalAlpha = 1;
+  if (fighter.variant === "supercharged" && fighter.charging > 0) {
+    const pulse = 4 + Math.round(Math.sin(step * 0.45) * 2);
+    ctx.strokeStyle = "#a855f7";
+    ctx.lineWidth = 3;
+    ctx.strokeRect(Math.round(weaponX - pulse), Math.round(weaponY - pulse), pulse * 2, pulse * 2);
+  }
+  ctx.restore();
+
+  drawPixelMatrix(
+    ctx,
+    style.item,
+    style,
+    weaponX,
+    weaponY,
+    growthScale,
+    fighter.weaponAngle + Math.PI / 2,
+  );
+}
+
 function drawFighter(ctx: CanvasRenderingContext2D, fighter: FighterState, step: number) {
   if (!fighter.alive) {
     ctx.save();
@@ -143,6 +217,7 @@ function drawFighter(ctx: CanvasRenderingContext2D, fighter: FighterState, step:
 
   ctx.save();
   drawStatusRings(ctx, fighter);
+  drawVariantPixels(ctx, fighter, step);
   if (fighter.charging > 0) {
     const pulse = 1 + Math.sin(step * 0.32) * 0.08;
     ctx.strokeStyle = "#7c3aed";
@@ -179,11 +254,11 @@ function drawFighter(ctx: CanvasRenderingContext2D, fighter: FighterState, step:
   ctx.stroke();
   ctx.globalAlpha = 1;
 
-  ctx.fillStyle = fighter.ink;
-  ctx.font = `900 ${Math.max(11, fighter.radius * 0.65)}px Arial, sans-serif`;
-  ctx.textAlign = "center";
-  ctx.textBaseline = "middle";
-  ctx.fillText(fighter.mark, fighter.x, fighter.y + 0.5);
+  const pixelStyle = getPixelStyle(fighter.templateId);
+  const face = fighter.ultimatePose > 0 && pixelStyle.ultimateFace
+    ? pixelStyle.ultimateFace
+    : pixelStyle.face;
+  drawPixelMatrix(ctx, face, pixelStyle, fighter.x, fighter.y + 1, fighter.radius >= 22 ? 2 : 1.65);
 
   const barWidth = 48;
   const healthRatio = Math.max(0, fighter.hp / fighter.maxHp);
@@ -204,6 +279,68 @@ function drawFighter(ctx: CanvasRenderingContext2D, fighter: FighterState, step:
     ctx.fillStyle = "#7c3aed";
     ctx.fill();
   }
+  ctx.textAlign = "center";
+  ctx.textBaseline = "middle";
+  ctx.fillStyle = "#111827";
+  ctx.font = "900 7px ui-monospace, monospace";
+  ctx.fillText(`${Math.round(fighter.weaponDamage)} DMG · ${fighter.weaponHits} HIT`, fighter.x, fighter.y + fighter.radius + 21);
+  ctx.restore();
+}
+
+function drawImpactLayer(ctx: CanvasRenderingContext2D, state: BattleState) {
+  for (const particle of state.particles) {
+    ctx.save();
+    ctx.globalAlpha = Math.max(0, particle.life / particle.maxLife);
+    ctx.fillStyle = particle.color;
+    ctx.fillRect(
+      Math.round(particle.x - particle.size / 2),
+      Math.round(particle.y - particle.size / 2),
+      particle.size,
+      particle.size,
+    );
+    ctx.restore();
+  }
+  for (const popup of state.damagePopups) {
+    ctx.save();
+    ctx.globalAlpha = Math.min(1, popup.life * 2.4);
+    ctx.textAlign = "center";
+    ctx.textBaseline = "middle";
+    ctx.lineWidth = popup.critical ? 4 : 3;
+    ctx.strokeStyle = "#111827";
+    ctx.fillStyle = popup.color;
+    ctx.font = `1000 ${popup.critical ? 18 : 12}px ui-monospace, monospace`;
+    const label = `${popup.critical ? "!" : ""}-${Math.max(1, Math.round(popup.value))}`;
+    ctx.strokeText(label, popup.x, popup.y);
+    ctx.fillText(label, popup.x, popup.y);
+    ctx.restore();
+  }
+}
+
+function drawUltimateBanner(ctx: CanvasRenderingContext2D, state: BattleState) {
+  const banner = state.banner;
+  if (!banner) return;
+  const progress = banner.timer / banner.maxTimer;
+  const width = 560;
+  const x = state.width / 2 - width / 2;
+  const y = 88;
+  ctx.save();
+  ctx.globalAlpha = Math.min(1, (1 - progress) * 5, progress * 5);
+  ctx.fillStyle = "rgba(17, 24, 39, .92)";
+  ctx.fillRect(x, y, width, 58);
+  ctx.fillStyle = banner.color;
+  ctx.fillRect(x, y, 9, 58);
+  ctx.fillRect(x + width - 9, y, 9, 58);
+  ctx.strokeStyle = "#ffffff";
+  ctx.lineWidth = 3;
+  ctx.strokeRect(x, y, width, 58);
+  ctx.textAlign = "center";
+  ctx.textBaseline = "middle";
+  ctx.fillStyle = "#facc15";
+  ctx.font = "900 10px ui-monospace, monospace";
+  ctx.fillText(`${banner.fighterName} · ULTIMATE`, state.width / 2, y + 17);
+  ctx.fillStyle = "#ffffff";
+  ctx.font = "1000 24px Arial, sans-serif";
+  ctx.fillText(banner.moveName, state.width / 2, y + 40);
   ctx.restore();
 }
 
@@ -279,8 +416,15 @@ export function drawBattle(ctx: CanvasRenderingContext2D, state: BattleState) {
   drawPaper(ctx, state);
   drawHazards(ctx, state);
   drawEffects(ctx, state);
+  for (const fighter of state.fighters) drawWeapon(ctx, fighter, state.step);
   for (const fighter of state.fighters) drawFighter(ctx, fighter, state.step);
+  drawImpactLayer(ctx, state);
   drawHeader(ctx, state);
+  drawUltimateBanner(ctx, state);
   drawWinner(ctx, state);
+  if (state.hitStop > 0) {
+    ctx.fillStyle = "rgba(255, 255, 255, .08)";
+    ctx.fillRect(0, 0, state.width, state.height);
+  }
   ctx.restore();
 }

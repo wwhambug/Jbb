@@ -115,7 +115,13 @@ export interface FighterState {
   counter: number;
   hitFlash: number;
   charging: number;
+  ultimatePose: number;
   pendingMove: PendingMove | null;
+  weaponAngle: number;
+  weaponSpin: number;
+  weaponReach: number;
+  weaponDamage: number;
+  weaponHits: number;
   kills: number;
   damageDone: number;
 }
@@ -166,6 +172,37 @@ export interface SlashState {
   width: number;
 }
 
+export interface ParticleState {
+  id: number;
+  x: number;
+  y: number;
+  vx: number;
+  vy: number;
+  life: number;
+  maxLife: number;
+  color: string;
+  size: number;
+}
+
+export interface DamagePopupState {
+  id: number;
+  x: number;
+  y: number;
+  value: number;
+  life: number;
+  color: string;
+  critical: boolean;
+}
+
+export interface BattleBanner {
+  fighterUid: number;
+  fighterName: string;
+  moveName: string;
+  color: string;
+  timer: number;
+  maxTimer: number;
+}
+
 export interface BattleState {
   seed: string;
   seedHash: number;
@@ -179,9 +216,17 @@ export interface BattleState {
   slashes: SlashState[];
   events: BattleEvent[];
   activeCollisions: Set<string>;
+  activeWeaponHits: Set<string>;
+  particles: ParticleState[];
+  damagePopups: DamagePopupState[];
+  banner: BattleBanner | null;
   nextEffectId: number;
   winnerUid: number | null;
   finished: boolean;
   shake: number;
+  hitStop: number;
+  impactCount: number;
+  ultimateCount: number;
+  lastImpactPower: number;
   fingerprint: string;
 }

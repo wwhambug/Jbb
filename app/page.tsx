@@ -1,14 +1,15 @@
 "use client";
 
 import { memo, useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { PixelOrb } from "./components/PixelOrb";
 import { drawBattle } from "./game/draw";
 import {
   createBattle,
   FIXED_DT,
   hashString,
-  simulateFingerprint,
   stepBattle,
 } from "./game/engine";
+import { getPixelStyle } from "./game/pixel-art";
 import { FIGHTERS, FIGHTER_BY_ID, VARIANTS } from "./game/roster";
 import type { BattleState, RosterPick, VariantId } from "./game/types";
 
@@ -29,7 +30,34 @@ function getSnapshot(state: BattleState): BattleState {
     hazards: [],
     slashes: [],
     activeCollisions: new Set(),
+    activeWeaponHits: new Set(),
+    particles: [],
+    damagePopups: [],
+    banner: state.banner ? { ...state.banner } : null,
   };
+}
+
+function playTone(
+  context: AudioContext | null,
+  frequency: number,
+  duration: number,
+  volume: number,
+  type: OscillatorType,
+  delay = 0,
+) {
+  if (!context || context.state !== "running") return;
+  const now = context.currentTime + delay;
+  const oscillator = context.createOscillator();
+  const gain = context.createGain();
+  oscillator.type = type;
+  oscillator.frequency.setValueAtTime(frequency, now);
+  oscillator.frequency.exponentialRampToValueAtTime(Math.max(45, frequency * 0.52), now + duration);
+  gain.gain.setValueAtTime(volume, now);
+  gain.gain.exponentialRampToValueAtTime(0.0001, now + duration);
+  oscillator.connect(gain);
+  gain.connect(context.destination);
+  oscillator.start(now);
+  oscillator.stop(now + duration);
 }
 
 const FighterTile = memo(function FighterTile({
@@ -53,10 +81,8 @@ const FighterTile = memo(function FighterTile({
       aria-pressed={selected}
       aria-label={`${fighter.name} ${selected ? "선택 해제" : "선택"}`}
     >
-      <span className="tile-orb" style={{ background: fighter.color, color: fighter.ink }}>
-        {fighter.mark}
-      </span>
-      <span className="tile-copy"><b>{fighter.name}</b><small>{fighter.role}</small></span>
+      <PixelOrb fighterId={fighter.id} color={fighter.color} ink={fighter.ink} size={44} className="tile-orb" />
+      <span className="tile-copy"><b>{fighter.name}</b><small>{fighter.role} · {getPixelStyle(fighter.id).itemName}</small></span>
       <span className="tile-check" aria-hidden="true">{selected ? "✓" : "+"}</span>
     </button>
   );
@@ -65,6 +91,9 @@ const FighterTile = memo(function FighterTile({
 export default function Home() {
   const canvasRef = useRef<HTMLCanvasElement | null>(null);
   const battleRef = useRef<BattleState | null>(null);
+  const audioRef = useRef<AudioContext | null>(null);
+  const lastImpactRef = useRef(0);
+  const lastUltimateRef = useRef(0);
   const [mode, setMode] = useState<GameMode>("setup");
   const [seed, setSeed] = useState("JBB-2026");
   const [picks, setPicks] = useState<RosterPick[]>([]);
@@ -75,7 +104,6 @@ export default function Home() {
   const [speed, setSpeed] = useState(1);
   const [query, setQuery] = useState("");
   const [notice, setNotice] = useState("공을 최소 2개 골라야 전투를 시작할 수 있다.");
-  const [verifyResult, setVerifyResult] = useState<"idle" | "checking" | "same" | "different">("idle");
 
   const selectedIds = useMemo(() => new Set(picks.map((pick) => pick.fighterId)), [picks]);
   const focused = FIGHTER_BY_ID.get(focusedId) ?? FIGHTERS[0];
@@ -122,10 +150,13 @@ export default function Home() {
       picks: picks.map((pick) => ({ ...pick })),
     };
     const battle = createBattle(config.seed, config.picks);
+    if (!audioRef.current) audioRef.current = new AudioContext();
+    void audioRef.current.resume();
+    lastImpactRef.current = battle.impactCount;
+    lastUltimateRef.current = battle.ultimateCount;
     battleRef.current = battle;
     setBattleConfig(config);
     setSnapshot(getSnapshot(battle));
-    setVerifyResult("idle");
     setPaused(false);
     setMode("battle");
   }, [picks, seed]);
@@ -133,9 +164,10 @@ export default function Home() {
   const restartBattle = useCallback(() => {
     if (!battleConfig) return;
     const battle = createBattle(battleConfig.seed, battleConfig.picks);
+    lastImpactRef.current = battle.impactCount;
+    lastUltimateRef.current = battle.ultimateCount;
     battleRef.current = battle;
     setSnapshot(getSnapshot(battle));
-    setVerifyResult("idle");
     setPaused(false);
   }, [battleConfig]);
 
@@ -158,6 +190,16 @@ export default function Home() {
           stepBattle(state);
           accumulator -= FIXED_DT;
           safety += 1;
+        }
+        if (state.impactCount !== lastImpactRef.current) {
+          lastImpactRef.current = state.impactCount;
+          const power = state.lastImpactPower;
+          playTone(audioRef.current, 150 + Math.min(220, power * 7), 0.055, Math.min(0.045, 0.012 + power * 0.0012), "square");
+        }
+        if (state.ultimateCount !== lastUltimateRef.current) {
+          lastUltimateRef.current = state.ultimateCount;
+          playTone(audioRef.current, 190, 0.34, 0.035, "sawtooth");
+          playTone(audioRef.current, 380, 0.28, 0.025, "square", 0.08);
         }
       }
       const canvas = canvasRef.current;
@@ -201,16 +243,6 @@ export default function Home() {
     setNotice("매치 코드를 복사했다.");
   };
 
-  const verifyDeterminism = () => {
-    if (!battleConfig) return;
-    setVerifyResult("checking");
-    window.setTimeout(() => {
-      const first = simulateFingerprint(battleConfig.seed, battleConfig.picks, 900);
-      const second = simulateFingerprint(battleConfig.seed, battleConfig.picks, 900);
-      setVerifyResult(first === second ? "same" : "different");
-    }, 10);
-  };
-
   const ranking = useMemo(() => {
     if (!snapshot) return [];
     return [...snapshot.fighters].sort(
@@ -222,6 +254,7 @@ export default function Home() {
 
   if (mode === "battle" && snapshot && battleConfig) {
     const alive = snapshot.fighters.filter((fighter) => fighter.alive).length;
+    const totalHits = snapshot.fighters.reduce((sum, fighter) => sum + fighter.weaponHits, 0);
     return (
       <main className="game-root battle-mode">
         <header className="game-header">
@@ -249,15 +282,15 @@ export default function Home() {
           </div>
 
           <aside className="battle-panel">
-            <div className="panel-title"><span>LIVE RANKING</span><b>#{snapshot.fingerprint}</b></div>
+            <div className="panel-title"><span>LIVE RANKING</span><b>{totalHits} WEAPON HITS</b></div>
             <ol className="rank-list">
               {ranking.map((fighter, index) => {
                 const variant = VARIANTS.find((entry) => entry.id === fighter.variant);
                 return (
                   <li key={fighter.uid} className={fighter.alive ? "" : "out"}>
                     <strong>{index + 1}</strong>
-                    <span className="rank-orb" style={{ background: fighter.color, color: fighter.ink }}>{fighter.mark}</span>
-                    <span><b>{fighter.name}</b><small>{variant?.short} · {fighter.kills} KO</small></span>
+                    <PixelOrb fighterId={fighter.templateId} color={fighter.color} ink={fighter.ink} size={33} variant={fighter.variant} showItem={false} className="rank-orb" />
+                    <span><b>{fighter.name}</b><small>{variant?.short} · {fighter.weaponHits} HIT · {fighter.kills} KO</small></span>
                     <em>{Math.max(0, Math.ceil(fighter.hp))}</em>
                   </li>
                 );
@@ -269,9 +302,7 @@ export default function Home() {
                 <p key={`${event.step}-${index}`} className={event.major ? "major" : ""}><time>{formatTime(event.step)}</time>{event.text}</p>
               ))}
             </div>
-            <button className={`verify-control ${verifyResult}`} type="button" onClick={verifyDeterminism} disabled={verifyResult === "checking"}>
-              {verifyResult === "checking" ? "재현 계산 중" : verifyResult === "same" ? "동일 시드 재현 성공" : verifyResult === "different" ? "재현 실패" : "시드 재현 검사"}
-            </button>
+            <div className="seed-lock"><i />SEED LOCKED · #{snapshot.fingerprint}</div>
           </aside>
         </section>
       </main>
@@ -298,7 +329,7 @@ export default function Home() {
             return (
               <button className={`loadout-chip${focusedId === fighter.id ? " active" : ""}`} type="button" key={fighter.id} onClick={() => setFocusedId(fighter.id)}>
                 <i>{index + 1}</i>
-                <span className="chip-orb" style={{ background: fighter.color, color: fighter.ink }}>{fighter.mark}</span>
+                <PixelOrb fighterId={fighter.id} color={fighter.color} ink={fighter.ink} size={40} variant={pick.variant} className="chip-orb" />
                 <span><b>{fighter.name}</b><small>{variant?.name}</small></span>
                 <em onClick={(event) => { event.stopPropagation(); toggleFighter(fighter.id); }} aria-label={`${fighter.name} 빼기`}>×</em>
               </button>
@@ -330,7 +361,7 @@ export default function Home() {
 
         <aside className="fighter-detail">
           <div className="detail-hero" style={{ background: `linear-gradient(145deg, ${focused.color}, #ffffff)` }}>
-            <span className="detail-orb" style={{ background: focused.color, color: focused.ink }}>{focused.mark}</span>
+            <PixelOrb fighterId={focused.id} color={focused.color} ink={focused.ink} size={94} variant={focusedPick?.variant} className="detail-orb" />
             <div><small>{focused.role}</small><h2>{focused.name}</h2><p>{focused.trait}</p></div>
             <button className={focusedPick ? "remove-fighter" : "add-fighter"} type="button" onClick={() => toggleFighter(focused.id)}>
               {focusedPick ? "편성에서 빼기" : "이 공 선택"}
@@ -338,9 +369,9 @@ export default function Home() {
           </div>
 
           <div className="stat-row">
-            <span><small>HP</small><b>{focused.hp}</b></span>
-            <span><small>SPEED</small><b>{focused.speed.toFixed(0)}</b></span>
-            <span><small>SIZE</small><b>{focused.radius}</b></span>
+            <span><small>ITEM</small><b>{getPixelStyle(focused.id).itemName}</b></span>
+            <span><small>START DMG</small><b>{getPixelStyle(focused.id).damage.toFixed(1)}</b></span>
+            <span><small>SPIN</small><b>{getPixelStyle(focused.id).spin.toFixed(1)}</b></span>
           </div>
 
           <section className="skills-box">

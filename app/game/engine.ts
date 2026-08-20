@@ -1,4 +1,5 @@
 import { FIGHTER_BY_ID } from "./roster";
+import { getPixelStyle } from "./pixel-art";
 import type {
   BattleEvent,
   BattleState,
@@ -66,10 +67,18 @@ export function createBattle(seed: string, picks: RosterPick[]): BattleState {
     slashes: [],
     events: [],
     activeCollisions: new Set<string>(),
+    activeWeaponHits: new Set<string>(),
+    particles: [],
+    damagePopups: [],
+    banner: null,
     nextEffectId: 1,
     winnerUid: null,
     finished: false,
     shake: 0,
+    hitStop: 0,
+    impactCount: 0,
+    ultimateCount: 0,
+    lastImpactPower: 0,
     fingerprint: "00000000",
   };
 
@@ -77,6 +86,7 @@ export function createBattle(seed: string, picks: RosterPick[]): BattleState {
     const template = FIGHTER_BY_ID.get(pick.fighterId);
     if (!template) return;
     const stats = variantStats(pick.variant);
+    const pixelStyle = getPixelStyle(template.id);
     const angle = (Math.PI * 2 * index) / Math.max(2, picks.length) - Math.PI / 2;
     const wobble = (random(state) - 0.5) * 28;
     const maxHp = Math.round(template.hp * stats.hp);
@@ -113,7 +123,13 @@ export function createBattle(seed: string, picks: RosterPick[]): BattleState {
       counter: 0,
       hitFlash: 0,
       charging: 0,
+      ultimatePose: 0,
       pendingMove: null,
+      weaponAngle: random(state) * Math.PI * 2,
+      weaponSpin: pixelStyle.spin * (index % 2 === 0 ? 1 : -1),
+      weaponReach: pixelStyle.reach,
+      weaponDamage: pixelStyle.damage,
+      weaponHits: 0,
       kills: 0,
       damageDone: 0,
     });
@@ -155,6 +171,34 @@ function normalize(dx: number, dy: number) {
   return { x: dx / distance, y: dy / distance, distance };
 }
 
+function addImpact(
+  state: BattleState,
+  x: number,
+  y: number,
+  color: string,
+  power: number,
+  critical = false,
+) {
+  state.impactCount += 1;
+  state.lastImpactPower = power;
+  const count = Math.min(12, 4 + Math.floor(power / 4) + (critical ? 3 : 0));
+  for (let index = 0; index < count; index += 1) {
+    const angle = random(state) * Math.PI * 2;
+    const speed = 28 + random(state) * (44 + power * 2.4);
+    state.particles.push({
+      id: state.nextEffectId++,
+      x,
+      y,
+      vx: Math.cos(angle) * speed,
+      vy: Math.sin(angle) * speed,
+      life: 0.18 + random(state) * 0.16,
+      maxLife: 0.34,
+      color: index % 3 === 0 ? "#ffffff" : color,
+      size: critical ? 4 : 2 + (index % 2),
+    });
+  }
+}
+
 function applyVariantStatus(target: FighterState, variant: VariantId) {
   if (variant === "flame") {
     target.burn = Math.max(target.burn, 3);
@@ -184,6 +228,18 @@ function damageFighter(
   target.hitFlash = 0.15;
   target.gauge = Math.min(100, target.gauge + remaining * 0.35);
   applyVariantStatus(target, variant);
+  if (attacker || remaining >= 4) {
+    state.damagePopups.push({
+      id: state.nextEffectId++,
+      x: target.x + (random(state) - 0.5) * target.radius,
+      y: target.y - target.radius,
+      value: remaining,
+      life: 0.58,
+      color: remaining >= 20 ? "#fef08a" : "#ffffff",
+      critical: remaining >= 20,
+    });
+    addImpact(state, target.x, target.y, attacker?.color ?? "#ffffff", remaining, remaining >= 20);
+  }
   if (attacker && attacker.alive) {
     attacker.gauge = Math.min(100, attacker.gauge + remaining * 0.85);
     attacker.damageDone += remaining;
@@ -398,8 +454,22 @@ function queueMove(
   const template = FIGHTER_BY_ID.get(fighter.templateId);
   if (!template) return;
   const move = ultimate ? template.ultimates[moveIndex] : template.basics[moveIndex];
-  if (fighter.variant === "supercharged") {
-    fighter.charging = 0.55;
+  const chargeTime = ultimate ? 0.68 : fighter.variant === "supercharged" ? 0.55 : 0;
+  if (ultimate) {
+    fighter.ultimatePose = 0.92;
+    state.banner = {
+      fighterUid: fighter.uid,
+      fighterName: fighter.name,
+      moveName: move.name,
+      color: fighter.color,
+      timer: 0.92,
+      maxTimer: 0.92,
+    };
+    state.ultimateCount += 1;
+    state.hitStop = Math.max(state.hitStop, 3);
+  }
+  if (chargeTime > 0) {
+    fighter.charging = chargeTime;
     fighter.pendingMove = { moveIndex, ultimate, targetUid: target.uid };
   } else {
     executeMove(state, fighter, target, move, ultimate);
@@ -483,6 +553,7 @@ function updateFighter(state: BattleState, fighter: FighterState) {
   fighter.phase = Math.max(0, fighter.phase - dt);
   fighter.overcharge = Math.max(0, fighter.overcharge - dt);
   fighter.counter = Math.max(0, fighter.counter - dt);
+  fighter.ultimatePose = Math.max(0, fighter.ultimatePose - dt);
   if (fighter.regen > 0) {
     fighter.regen = Math.max(0, fighter.regen - dt);
     fighter.hp = Math.min(fighter.maxHp, fighter.hp + fighter.maxHp * 0.012 * dt);
@@ -528,7 +599,7 @@ function updateFighter(state: BattleState, fighter: FighterState) {
   }
 
   const direction = normalize(target.x - fighter.x, target.y - fighter.y);
-  const preferred = 92 + (fighter.uid % 4) * 18;
+  const preferred = Math.max(54, fighter.radius + fighter.weaponReach + target.radius - 3 + (fighter.uid % 3) * 5);
   const chaseSign = direction.distance < preferred ? -0.45 : 1;
   const statusSpeed = fighter.slow > 0 ? 0.7 : 1;
   const hasteSpeed = fighter.haste > 0 ? 1.35 : 1;
@@ -561,6 +632,55 @@ function updateFighter(state: BattleState, fighter: FighterState) {
     fighter.y = state.height - wall - fighter.radius;
     fighter.vy = -Math.abs(fighter.vy) * 0.92;
   }
+}
+
+function updateWeapons(state: BattleState) {
+  const next = new Set<string>();
+  for (const attacker of state.fighters) {
+    if (!attacker.alive) continue;
+    const style = getPixelStyle(attacker.templateId);
+    const statusSpin = attacker.slow > 0 ? 0.72 : 1;
+    const hasteSpin = attacker.haste > 0 ? 1.28 : 1;
+    const variantSpin = attacker.variant === "swift" ? 1.24 : attacker.variant === "supercharged" ? 0.74 : 1;
+    attacker.weaponAngle += attacker.weaponSpin * statusSpin * hasteSpin * variantSpin * FIXED_DT;
+    const orbit = attacker.radius + attacker.weaponReach;
+    const weaponX = attacker.x + Math.cos(attacker.weaponAngle) * orbit;
+    const weaponY = attacker.y + Math.sin(attacker.weaponAngle) * orbit;
+
+    for (const target of state.fighters) {
+      if (!target.alive || target.uid === attacker.uid) continue;
+      const distance = Math.hypot(target.x - weaponX, target.y - weaponY);
+      if (distance > target.radius + style.itemRadius) continue;
+      const key = `${attacker.uid}:${target.uid}`;
+      next.add(key);
+      if (state.activeWeaponHits.has(key)) continue;
+
+      const variantDamage = attacker.variant === "supercharged" ? 1.45 : attacker.variant === "flame" ? 1.08 : 1;
+      const dealt = damageFighter(
+        state,
+        target,
+        attacker.weaponDamage * variantDamage,
+        attacker,
+        attacker.variant,
+        style.itemName,
+      );
+      if (dealt <= 0) continue;
+
+      const push = normalize(target.x - attacker.x, target.y - attacker.y);
+      target.vx += push.x * (42 + dealt * 2.2);
+      target.vy += push.y * (42 + dealt * 2.2);
+      attacker.vx -= push.x * 9;
+      attacker.vy -= push.y * 9;
+      attacker.weaponHits += 1;
+      const spinSign = Math.sign(attacker.weaponSpin) || 1;
+      attacker.weaponSpin = spinSign * Math.min(7.2, Math.abs(attacker.weaponSpin) + 0.055);
+      attacker.weaponDamage = Math.min(style.damage + 18, attacker.weaponDamage + 0.36);
+      attacker.weaponReach = Math.min(style.reach + 17, attacker.weaponReach + 0.15);
+      state.hitStop = Math.max(state.hitStop, dealt >= 18 ? 5 : 2);
+      state.shake = Math.max(state.shake, Math.min(0.22, 0.045 + dealt * 0.006));
+    }
+  }
+  state.activeWeaponHits = next;
 }
 
 function updateProjectiles(state: BattleState) {
@@ -645,6 +765,8 @@ function updateCollisions(state: BattleState) {
         // JBB의 기본 규칙: 서로 부딪힐 때 양쪽 모두 정확히 1 피해.
         damageFighter(state, left, 1, right, "classic", "자연 충돌", false);
         damageFighter(state, right, 1, left, "classic", "자연 충돌", false);
+        state.hitStop = Math.max(state.hitStop, 1);
+        state.shake = Math.max(state.shake, 0.035);
       }
     }
   }
@@ -655,13 +777,36 @@ function updateEffects(state: BattleState) {
   state.slashes = state.slashes
     .map((slash) => ({ ...slash, life: slash.life - FIXED_DT }))
     .filter((slash) => slash.life > 0);
+  state.particles = state.particles
+    .map((particle) => ({
+      ...particle,
+      x: particle.x + particle.vx * FIXED_DT,
+      y: particle.y + particle.vy * FIXED_DT,
+      vx: particle.vx * 0.92,
+      vy: particle.vy * 0.92 + 18 * FIXED_DT,
+      life: particle.life - FIXED_DT,
+    }))
+    .filter((particle) => particle.life > 0);
+  state.damagePopups = state.damagePopups
+    .map((popup) => ({ ...popup, y: popup.y - 24 * FIXED_DT, life: popup.life - FIXED_DT }))
+    .filter((popup) => popup.life > 0);
+  if (state.banner) {
+    state.banner = { ...state.banner, timer: state.banner.timer - FIXED_DT };
+    if (state.banner.timer <= 0) state.banner = null;
+  }
   state.shake = Math.max(0, state.shake - FIXED_DT);
 }
 
 export function stepBattle(state: BattleState) {
   if (state.finished) return;
   state.step += 1;
+  if (state.hitStop > 0) {
+    state.hitStop -= 1;
+    if (state.step % 30 === 0) state.fingerprint = fingerprint(state);
+    return;
+  }
   for (const fighter of state.fighters) updateFighter(state, fighter);
+  updateWeapons(state);
   updateProjectiles(state);
   updateHazards(state);
   updateCollisions(state);
@@ -698,6 +843,10 @@ export function fingerprint(state: BattleState): string {
       Math.round(fighter.y * 100),
       Math.round(fighter.hp * 100),
       Math.round(fighter.gauge * 100),
+      Math.round(fighter.weaponAngle * 1000),
+      Math.round(fighter.weaponDamage * 100),
+      Math.round(fighter.weaponReach * 100),
+      fighter.weaponHits,
       fighter.alive ? 1 : 0,
     ]),
     state.projectiles.length,

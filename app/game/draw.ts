@@ -14,22 +14,32 @@ function roundedRect(
 }
 
 function drawPaper(ctx: CanvasRenderingContext2D, state: BattleState) {
-  ctx.fillStyle = "#f5efd9";
+  const floor = ctx.createRadialGradient(
+    state.width / 2,
+    state.height / 2,
+    40,
+    state.width / 2,
+    state.height / 2,
+    state.width * 0.7,
+  );
+  floor.addColorStop(0, "#f8edc8");
+  floor.addColorStop(1, "#cdbb82");
+  ctx.fillStyle = floor;
   ctx.fillRect(0, 0, state.width, state.height);
-  ctx.strokeStyle = "rgba(61, 52, 36, .055)";
-  ctx.lineWidth = 1;
-  for (let x = 12; x < state.width; x += 24) {
-    ctx.beginPath();
-    ctx.moveTo(x, 0);
-    ctx.lineTo(x, state.height);
-    ctx.stroke();
-  }
-  for (let y = 12; y < state.height; y += 24) {
-    ctx.beginPath();
-    ctx.moveTo(0, y);
-    ctx.lineTo(state.width, y);
-    ctx.stroke();
-  }
+  ctx.strokeStyle = "rgba(16, 42, 73, .22)";
+  ctx.lineWidth = 3;
+  ctx.beginPath();
+  ctx.arc(state.width / 2, state.height / 2, 105, 0, Math.PI * 2);
+  ctx.stroke();
+  ctx.beginPath();
+  ctx.moveTo(state.width / 2, 22);
+  ctx.lineTo(state.width / 2, state.height - 22);
+  ctx.stroke();
+  ctx.setLineDash([8, 10]);
+  ctx.beginPath();
+  ctx.arc(state.width / 2, state.height / 2, Math.min(state.width, state.height) * 0.4, 0, Math.PI * 2);
+  ctx.stroke();
+  ctx.setLineDash([]);
   ctx.strokeStyle = "#1f2937";
   ctx.lineWidth = 5;
   roundedRect(ctx, 12, 12, state.width - 24, state.height - 24, 26);

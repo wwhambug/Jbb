@@ -146,7 +146,7 @@ export const FIGHTER_BY_ID = new Map(FIGHTERS.map((fighter) => [fighter.id, figh
 
 export const VARIANTS: VariantSpec[] = [
   { id: "classic", name: "기본형", short: "기본", description: "원래 능력치 그대로 싸운다.", color: "#64748b" },
-  { id: "supercharged", name: "슈퍼차지드", short: "충전", description: "0.55초 충전 후 45% 강한 공격을 발사한다.", color: "#7c3aed" },
+  { id: "supercharged", name: "슈퍼차지드", short: "3초 충전", description: "정확히 3초 충전한 뒤 초강력 넉백 공격을 발사한다.", color: "#7c3aed" },
   { id: "flame", name: "화염형", short: "화염", description: "공격이 3초 동안 작은 화상 피해를 남긴다.", color: "#ea580c" },
   { id: "frost", name: "빙결형", short: "빙결", description: "공격이 상대 이동 속도를 잠시 낮춘다.", color: "#0891b2" },
   { id: "titan", name: "거대형", short: "거대", description: "체력과 크기가 늘지만 이동이 느려진다.", color: "#854d0e" },

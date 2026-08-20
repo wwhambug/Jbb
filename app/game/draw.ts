@@ -1,5 +1,6 @@
 import { FIGHTER_BY_ID, VARIANTS } from "./roster";
 import { drawPixelMatrix, getPixelStyle } from "./pixel-art";
+import { SUPERCHARGE_SECONDS } from "./engine";
 import type { BattleState, FighterState } from "./types";
 
 function roundedRect(
@@ -216,17 +217,57 @@ function drawFighter(ctx: CanvasRenderingContext2D, fighter: FighterState, step:
   }
 
   ctx.save();
+  const movementSpeed = Math.hypot(fighter.vx, fighter.vy);
+  if (movementSpeed >= 135) {
+    const trailX = fighter.vx / movementSpeed;
+    const trailY = fighter.vy / movementSpeed;
+    ctx.fillStyle = fighter.color;
+    for (let index = 1; index <= 3; index += 1) {
+      const distance = fighter.radius + 7 + index * 8;
+      const size = Math.max(2, 7 - index);
+      ctx.globalAlpha = Math.min(0.58, movementSpeed / 700) * (1 - index * 0.17);
+      ctx.fillRect(
+        Math.round(fighter.x - trailX * distance - size / 2),
+        Math.round(fighter.y - trailY * distance - size / 2),
+        size,
+        size,
+      );
+    }
+    ctx.globalAlpha = 1;
+  }
   drawStatusRings(ctx, fighter);
   drawVariantPixels(ctx, fighter, step);
   if (fighter.charging > 0) {
-    const pulse = 1 + Math.sin(step * 0.32) * 0.08;
-    ctx.strokeStyle = "#7c3aed";
+    const chargeDuration = fighter.variant === "supercharged" ? SUPERCHARGE_SECONDS : 0.68;
+    const progress = Math.max(0, Math.min(1, 1 - fighter.charging / chargeDuration));
+    const pulse = 1 + Math.sin(step * 0.32) * 0.04;
+    ctx.strokeStyle = "rgba(124, 58, 237, .24)";
     ctx.lineWidth = 5;
-    ctx.setLineDash([8, 5]);
     ctx.beginPath();
     ctx.arc(fighter.x, fighter.y, (fighter.radius + 13) * pulse, 0, Math.PI * 2);
     ctx.stroke();
-    ctx.setLineDash([]);
+    ctx.strokeStyle = "#7c3aed";
+    ctx.lineWidth = 5;
+    ctx.beginPath();
+    ctx.arc(
+      fighter.x,
+      fighter.y,
+      (fighter.radius + 13) * pulse,
+      -Math.PI / 2,
+      -Math.PI / 2 + Math.PI * 2 * progress,
+    );
+    ctx.stroke();
+    if (fighter.variant === "supercharged") {
+      ctx.textAlign = "center";
+      ctx.textBaseline = "middle";
+      ctx.font = "1000 9px ui-monospace, monospace";
+      ctx.lineWidth = 3;
+      ctx.strokeStyle = "#111827";
+      ctx.fillStyle = "#f5f3ff";
+      const chargeLabel = `CHARGE ${Math.max(0, fighter.charging).toFixed(1)}s`;
+      ctx.strokeText(chargeLabel, fighter.x, fighter.y - fighter.radius - 29);
+      ctx.fillText(chargeLabel, fighter.x, fighter.y - fighter.radius - 29);
+    }
   }
 
   ctx.shadowColor = "rgba(39, 32, 20, .2)";

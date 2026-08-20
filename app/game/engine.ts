@@ -14,6 +14,12 @@ import type {
 export const FIXED_DT = 1 / 60;
 export const ARENA_WIDTH = 960;
 export const ARENA_HEIGHT = 600;
+export const SUPERCHARGE_SECONDS = 3;
+export const CHAOS_SPEED_LIMIT = 620;
+
+const COLLISION_SPEED_MULTIPLIER = 1.075;
+const COLLISION_SPEED_BONUS = 8;
+const SUPERCHARGE_KNOCKBACK_MULTIPLIER = 4.8;
 
 export function hashString(value: string): number {
   let hash = 2166136261;
@@ -90,6 +96,10 @@ export function createBattle(seed: string, picks: RosterPick[]): BattleState {
     const angle = (Math.PI * 2 * index) / Math.max(2, picks.length) - Math.PI / 2;
     const wobble = (random(state) - 0.5) * 28;
     const maxHp = Math.round(template.hp * stats.hp);
+    const movementSpeed = template.speed * stats.speed;
+    // 이동 방향은 상대 위치와 무관한 시드 기반 2축 관성이다.
+    const launchAngle = random(state) * Math.PI * 2 + index * 2.399963229728653;
+    const launchSpeed = movementSpeed * (1.5 + random(state) * 0.35);
     state.fighters.push({
       uid: index + 1,
       templateId: template.id,
@@ -100,12 +110,13 @@ export function createBattle(seed: string, picks: RosterPick[]): BattleState {
       ink: template.ink,
       x: state.width / 2 + Math.cos(angle) * (285 + wobble),
       y: state.height / 2 + Math.sin(angle) * (190 + wobble * 0.45),
-      vx: Math.cos(angle + Math.PI) * (20 + random(state) * 12),
-      vy: Math.sin(angle + Math.PI) * (20 + random(state) * 12),
+      vx: Math.cos(launchAngle) * launchSpeed,
+      vy: Math.sin(launchAngle) * launchSpeed,
       radius: template.radius * stats.radius,
       hp: maxHp,
       maxHp,
-      speed: template.speed * stats.speed,
+      speed: movementSpeed,
+      motionScale: 1,
       cooldown: 0.35 + random(state) * 0.7,
       specialCooldown: 2.5 + random(state) * 2,
       gauge: random(state) * 16,
@@ -207,6 +218,28 @@ function applyVariantStatus(target: FighterState, variant: VariantId) {
   if (variant === "frost") target.slow = Math.max(target.slow, 2.4);
 }
 
+function capVelocity(fighter: FighterState, limit = CHAOS_SPEED_LIMIT) {
+  const speed = Math.hypot(fighter.vx, fighter.vy);
+  if (speed <= limit || speed <= 0.0001) return;
+  fighter.vx = (fighter.vx / speed) * limit;
+  fighter.vy = (fighter.vy / speed) * limit;
+}
+
+function boostCollisionSpeed(fighter: FighterState, fallbackX: number, fallbackY: number) {
+  const speed = Math.hypot(fighter.vx, fighter.vy);
+  if (speed <= 0.0001) {
+    fighter.vx = fallbackX * 34;
+    fighter.vy = fallbackY * 34;
+    return;
+  }
+  const nextSpeed = Math.min(
+    CHAOS_SPEED_LIMIT,
+    Math.max(speed * COLLISION_SPEED_MULTIPLIER, speed + COLLISION_SPEED_BONUS),
+  );
+  fighter.vx = (fighter.vx / speed) * nextSpeed;
+  fighter.vy = (fighter.vy / speed) * nextSpeed;
+}
+
 function damageFighter(
   state: BattleState,
   target: FighterState,
@@ -291,6 +324,9 @@ function createProjectile(
   const direction = normalize(target.x - fighter.x, target.y - fighter.y);
   const baseAngle = Math.atan2(direction.y, direction.x) + angleOffset;
   const speed = (move.speed ?? 280) * (ultimate ? 1.08 : 1);
+  const knockbackMultiplier = fighter.variant === "supercharged"
+    ? SUPERCHARGE_KNOCKBACK_MULTIPLIER
+    : 1;
   const projectile: ProjectileState = {
     id: state.nextEffectId++,
     ownerUid: fighter.uid,
@@ -300,6 +336,7 @@ function createProjectile(
     vy: Math.sin(baseAngle) * speed,
     radius: ultimate ? 8 : 5.5,
     damage,
+    knockback: (ultimate ? 82 : 38) * knockbackMultiplier,
     life: Math.max(0.75, move.range / speed + 0.3),
     color: fighter.color,
     variant: fighter.variant,
@@ -321,6 +358,9 @@ function executeMove(
   const flame = fighter.variant === "flame" ? 1.08 : 1;
   const damage = move.damage * charged * boosted * flame;
   const direction = normalize(target.x - fighter.x, target.y - fighter.y);
+  const knockbackMultiplier = fighter.variant === "supercharged"
+    ? SUPERCHARGE_KNOCKBACK_MULTIPLIER
+    : 1;
 
   if (ultimate) {
     addEvent(state, `${fighter.name} 궁극기 · ${move.name}`, fighter.color, true);
@@ -345,10 +385,12 @@ function executeMove(
       break;
     }
     case "dash":
-      fighter.vx += direction.x * (ultimate ? 250 : 175);
-      fighter.vy += direction.y * (ultimate ? 250 : 175);
+      fighter.vx += direction.x * (ultimate ? 250 : 175) * (fighter.variant === "supercharged" ? 1.65 : 1);
+      fighter.vy += direction.y * (ultimate ? 250 : 175) * (fighter.variant === "supercharged" ? 1.65 : 1);
       if (direction.distance < move.range * 0.72) {
         damageFighter(state, target, damage, fighter, fighter.variant, move.name);
+        target.vx += direction.x * 62 * knockbackMultiplier;
+        target.vy += direction.y * 62 * knockbackMultiplier;
       }
       break;
     case "burst": {
@@ -359,8 +401,8 @@ function executeMove(
         if (dist <= radius + enemy.radius) {
           damageFighter(state, enemy, damage * (1 - dist / (radius * 2.4)), fighter, fighter.variant, move.name);
           const away = normalize(enemy.x - fighter.x, enemy.y - fighter.y);
-          enemy.vx += away.x * (ultimate ? 110 : 65);
-          enemy.vy += away.y * (ultimate ? 110 : 65);
+          enemy.vx += away.x * (ultimate ? 110 : 65) * knockbackMultiplier;
+          enemy.vy += away.y * (ultimate ? 110 : 65) * knockbackMultiplier;
         }
       }
       state.hazards.push({
@@ -374,6 +416,7 @@ function executeMove(
         pulse: 10,
         color: fighter.color,
         variant: fighter.variant,
+        knockback: 0,
       });
       break;
     }
@@ -381,8 +424,8 @@ function executeMove(
     case "push": {
       damageFighter(state, target, damage * 0.78, fighter, fighter.variant, move.name);
       const sign = move.kind === "pull" ? -1 : 1;
-      target.vx += direction.x * sign * (ultimate ? 220 : 125);
-      target.vy += direction.y * sign * (ultimate ? 220 : 125);
+      target.vx += direction.x * sign * (ultimate ? 220 : 125) * knockbackMultiplier;
+      target.vy += direction.y * sign * (ultimate ? 220 : 125) * knockbackMultiplier;
       state.slashes.push({
         id: state.nextEffectId++,
         x1: fighter.x,
@@ -398,6 +441,8 @@ function executeMove(
     }
     case "beam":
       damageFighter(state, target, damage, fighter, fighter.variant, move.name);
+      target.vx += direction.x * (ultimate ? 82 : 44) * knockbackMultiplier;
+      target.vy += direction.y * (ultimate ? 82 : 44) * knockbackMultiplier;
       state.slashes.push({
         id: state.nextEffectId++,
         x1: fighter.x,
@@ -422,6 +467,7 @@ function executeMove(
         pulse: 0.25,
         color: fighter.color,
         variant: fighter.variant,
+        knockback: (ultimate ? 74 : 46) * knockbackMultiplier,
       };
       state.hazards.push(hazard);
       break;
@@ -429,6 +475,8 @@ function executeMove(
     case "heal":
       fighter.hp = Math.min(fighter.maxHp, fighter.hp + damage * 0.62);
       damageFighter(state, target, damage * 0.55, fighter, fighter.variant, move.name);
+      target.vx += direction.x * 36 * knockbackMultiplier;
+      target.vy += direction.y * 36 * knockbackMultiplier;
       state.slashes.push({
         id: state.nextEffectId++,
         x1: fighter.x,
@@ -454,9 +502,15 @@ function queueMove(
   const template = FIGHTER_BY_ID.get(fighter.templateId);
   if (!template) return;
   const move = ultimate ? template.ultimates[moveIndex] : template.basics[moveIndex];
-  const chargeTime = ultimate ? 0.68 : fighter.variant === "supercharged" ? 0.55 : 0;
+  const chargeTime = fighter.variant === "supercharged"
+    ? SUPERCHARGE_SECONDS
+    : ultimate
+      ? 0.68
+      : 0;
   if (ultimate) {
-    fighter.ultimatePose = 0.92;
+    fighter.ultimatePose = fighter.variant === "supercharged"
+      ? SUPERCHARGE_SECONDS + 0.35
+      : 0.92;
     state.banner = {
       fighterUid: fighter.uid,
       fighterName: fighter.name,
@@ -471,6 +525,9 @@ function queueMove(
   if (chargeTime > 0) {
     fighter.charging = chargeTime;
     fighter.pendingMove = { moveIndex, ultimate, targetUid: target.uid };
+    if (fighter.variant === "supercharged") {
+      addEvent(state, `${fighter.name} 슈퍼차지 · 3초`, "#7c3aed");
+    }
   } else {
     executeMove(state, fighter, target, move, ultimate);
   }
@@ -554,6 +611,13 @@ function updateFighter(state: BattleState, fighter: FighterState) {
   fighter.overcharge = Math.max(0, fighter.overcharge - dt);
   fighter.counter = Math.max(0, fighter.counter - dt);
   fighter.ultimatePose = Math.max(0, fighter.ultimatePose - dt);
+  const nextMotionScale = (fighter.slow > 0 ? 0.7 : 1) * (fighter.haste > 0 ? 1.28 : 1);
+  if (Math.abs(nextMotionScale - fighter.motionScale) > 0.0001) {
+    const ratio = nextMotionScale / fighter.motionScale;
+    fighter.vx *= ratio;
+    fighter.vy *= ratio;
+    fighter.motionScale = nextMotionScale;
+  }
   if (fighter.regen > 0) {
     fighter.regen = Math.max(0, fighter.regen - dt);
     fighter.hp = Math.min(fighter.maxHp, fighter.hp + fighter.maxHp * 0.012 * dt);
@@ -569,8 +633,6 @@ function updateFighter(state: BattleState, fighter: FighterState) {
 
   if (fighter.charging > 0 && fighter.pendingMove) {
     fighter.charging -= dt;
-    fighter.vx *= 0.97;
-    fighter.vy *= 0.97;
     if (fighter.charging <= 0) {
       const pending = fighter.pendingMove;
       fighter.pendingMove = null;
@@ -598,39 +660,25 @@ function updateFighter(state: BattleState, fighter: FighterState) {
     }
   }
 
-  const direction = normalize(target.x - fighter.x, target.y - fighter.y);
-  const preferred = Math.max(54, fighter.radius + fighter.weaponReach + target.radius - 3 + (fighter.uid % 3) * 5);
-  const chaseSign = direction.distance < preferred ? -0.45 : 1;
-  const statusSpeed = fighter.slow > 0 ? 0.7 : 1;
-  const hasteSpeed = fighter.haste > 0 ? 1.35 : 1;
-  const acceleration = fighter.speed * statusSpeed * hasteSpeed * chaseSign;
-  fighter.vx += direction.x * acceleration * dt;
-  fighter.vy += direction.y * acceleration * dt;
-  const maxVelocity = fighter.speed * statusSpeed * hasteSpeed;
-  const currentVelocity = Math.hypot(fighter.vx, fighter.vy);
-  if (currentVelocity > maxVelocity) {
-    fighter.vx = (fighter.vx / currentVelocity) * maxVelocity;
-    fighter.vy = (fighter.vy / currentVelocity) * maxVelocity;
-  }
-  fighter.vx *= 0.994;
-  fighter.vy *= 0.994;
+  // 공은 표적을 추적하지 않는다. 현재 속도를 그대로 유지하는 2축 관성 이동만 한다.
+  capVelocity(fighter);
   fighter.x += fighter.vx * dt;
   fighter.y += fighter.vy * dt;
 
   const wall = 18;
   if (fighter.x - fighter.radius < wall) {
     fighter.x = wall + fighter.radius;
-    fighter.vx = Math.abs(fighter.vx) * 0.92;
+    fighter.vx = Math.abs(fighter.vx);
   } else if (fighter.x + fighter.radius > state.width - wall) {
     fighter.x = state.width - wall - fighter.radius;
-    fighter.vx = -Math.abs(fighter.vx) * 0.92;
+    fighter.vx = -Math.abs(fighter.vx);
   }
   if (fighter.y - fighter.radius < wall) {
     fighter.y = wall + fighter.radius;
-    fighter.vy = Math.abs(fighter.vy) * 0.92;
+    fighter.vy = Math.abs(fighter.vy);
   } else if (fighter.y + fighter.radius > state.height - wall) {
     fighter.y = state.height - wall - fighter.radius;
-    fighter.vy = -Math.abs(fighter.vy) * 0.92;
+    fighter.vy = -Math.abs(fighter.vy);
   }
 }
 
@@ -667,10 +715,12 @@ function updateWeapons(state: BattleState) {
       if (dealt <= 0) continue;
 
       const push = normalize(target.x - attacker.x, target.y - attacker.y);
-      target.vx += push.x * (42 + dealt * 2.2);
-      target.vy += push.y * (42 + dealt * 2.2);
+      const weaponKnockback = attacker.variant === "supercharged" ? 3.4 : 1;
+      target.vx += push.x * (42 + dealt * 2.2) * weaponKnockback;
+      target.vy += push.y * (42 + dealt * 2.2) * weaponKnockback;
       attacker.vx -= push.x * 9;
       attacker.vy -= push.y * 9;
+      capVelocity(target);
       attacker.weaponHits += 1;
       const spinSign = Math.sign(attacker.weaponSpin) || 1;
       attacker.weaponSpin = spinSign * Math.min(7.2, Math.abs(attacker.weaponSpin) + 0.055);
@@ -705,8 +755,9 @@ function updateProjectiles(state: BattleState) {
       if (Math.hypot(target.x - projectile.x, target.y - projectile.y) <= target.radius + projectile.radius) {
         damageFighter(state, target, projectile.damage, owner, projectile.variant, "투사체");
         const push = normalize(projectile.vx, projectile.vy);
-        target.vx += push.x * (projectile.ultimate ? 82 : 38);
-        target.vy += push.y * (projectile.ultimate ? 82 : 38);
+        target.vx += push.x * projectile.knockback;
+        target.vy += push.y * projectile.knockback;
+        capVelocity(target);
         hit = true;
         break;
       }
@@ -728,6 +779,12 @@ function updateHazards(state: BattleState) {
         if (!target.alive || target.uid === hazard.ownerUid) continue;
         if (Math.hypot(target.x - hazard.x, target.y - hazard.y) <= hazard.radius + target.radius) {
           damageFighter(state, target, hazard.damage, owner, hazard.variant, "위험 지대");
+          if (hazard.knockback > 0) {
+            const away = normalize(target.x - hazard.x, target.y - hazard.y);
+            target.vx += away.x * hazard.knockback;
+            target.vy += away.y * hazard.knockback;
+            capVelocity(target);
+          }
         }
       }
     }
@@ -745,7 +802,11 @@ function updateCollisions(state: BattleState) {
       const right = fighters[rightIndex];
       const dx = right.x - left.x;
       const dy = right.y - left.y;
-      const normal = normalize(dx, dy);
+      const rawDistance = Math.hypot(dx, dy);
+      const fallbackAngle = ((left.uid * 97 + right.uid * 53) % 360) * (Math.PI / 180);
+      const normal = rawDistance > 0.0001
+        ? { x: dx / rawDistance, y: dy / rawDistance, distance: rawDistance }
+        : { x: Math.cos(fallbackAngle), y: Math.sin(fallbackAngle), distance: 0 };
       const minimum = left.radius + right.radius;
       if (normal.distance >= minimum) continue;
       const key = `${Math.min(left.uid, right.uid)}:${Math.max(left.uid, right.uid)}`;
@@ -756,17 +817,29 @@ function updateCollisions(state: BattleState) {
       right.x += normal.x * overlap * 0.5;
       right.y += normal.y * overlap * 0.5;
       const relative = (right.vx - left.vx) * normal.x + (right.vy - left.vy) * normal.y;
-      const impulse = Math.max(26, Math.abs(relative) * 0.9);
-      left.vx -= normal.x * impulse;
-      left.vy -= normal.y * impulse;
-      right.vx += normal.x * impulse;
-      right.vy += normal.y * impulse;
-      if (!state.activeCollisions.has(key)) {
+      const freshCollision = !state.activeCollisions.has(key);
+      if (relative < 0) {
+        // 동일 질량 탄성 충돌: 법선 속도를 서로 교환하고 방향을 실제로 반전한다.
+        const impulse = -relative;
+        left.vx -= normal.x * impulse;
+        left.vy -= normal.y * impulse;
+        right.vx += normal.x * impulse;
+        right.vy += normal.y * impulse;
+      } else if (freshCollision) {
+        // 정지 상태에서 겹친 경우에도 서로 붙어 있지 않도록 최소 반동을 준다.
+        left.vx -= normal.x * 18;
+        left.vy -= normal.y * 18;
+        right.vx += normal.x * 18;
+        right.vy += normal.y * 18;
+      }
+      if (freshCollision) {
+        boostCollisionSpeed(left, -normal.x, -normal.y);
+        boostCollisionSpeed(right, normal.x, normal.y);
         // JBB의 기본 규칙: 서로 부딪힐 때 양쪽 모두 정확히 1 피해.
         damageFighter(state, left, 1, right, "classic", "자연 충돌", false);
         damageFighter(state, right, 1, left, "classic", "자연 충돌", false);
-        state.hitStop = Math.max(state.hitStop, 1);
-        state.shake = Math.max(state.shake, 0.035);
+        state.hitStop = Math.max(state.hitStop, 2);
+        state.shake = Math.max(state.shake, 0.06);
       }
     }
   }
@@ -841,12 +914,15 @@ export function fingerprint(state: BattleState): string {
       fighter.uid,
       Math.round(fighter.x * 100),
       Math.round(fighter.y * 100),
+      Math.round(fighter.vx * 100),
+      Math.round(fighter.vy * 100),
       Math.round(fighter.hp * 100),
       Math.round(fighter.gauge * 100),
       Math.round(fighter.weaponAngle * 1000),
       Math.round(fighter.weaponDamage * 100),
       Math.round(fighter.weaponReach * 100),
       fighter.weaponHits,
+      Math.round(fighter.charging * 100),
       fighter.alive ? 1 : 0,
     ]),
     state.projectiles.length,

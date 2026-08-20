@@ -290,7 +290,7 @@ export default function Home() {
                   <li key={fighter.uid} className={fighter.alive ? "" : "out"}>
                     <strong>{index + 1}</strong>
                     <PixelOrb fighterId={fighter.templateId} color={fighter.color} ink={fighter.ink} size={33} variant={fighter.variant} showItem={false} className="rank-orb" />
-                    <span><b>{fighter.name}</b><small>{variant?.short} · {fighter.weaponHits} HIT · {fighter.kills} KO</small></span>
+                    <span><b>{fighter.name}</b><small>{variant?.short} · {Math.round(Math.hypot(fighter.vx, fighter.vy))} SPD · {fighter.weaponHits} HIT · {fighter.kills} KO</small></span>
                     <em>{Math.max(0, Math.ceil(fighter.hp))}</em>
                   </li>
                 );

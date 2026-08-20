@@ -98,6 +98,7 @@ export interface FighterState {
   hp: number;
   maxHp: number;
   speed: number;
+  motionScale: number;
   cooldown: number;
   specialCooldown: number;
   gauge: number;
@@ -141,6 +142,7 @@ export interface ProjectileState {
   vy: number;
   radius: number;
   damage: number;
+  knockback: number;
   life: number;
   color: string;
   variant: VariantId;
@@ -158,6 +160,7 @@ export interface HazardState {
   pulse: number;
   color: string;
   variant: VariantId;
+  knockback: number;
 }
 
 export interface SlashState {

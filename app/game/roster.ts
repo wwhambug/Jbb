@@ -43,7 +43,7 @@ type FighterSeed = {
 };
 
 const SEEDS: FighterSeed[] = [
-  { id: "kojo", name: "코죠", mark: "KJ", role: "공간술사", trait: "거리를 접어 상대를 끌고 밀어낸다.", color: "#60a5fa", ink: "#102a56", moveNames: ["청색 당김", "적색 튕김", "무한 회랑", "보랏빛 충돌", "거리 무효"] },
+  { id: "gojo", name: "고죠", mark: "GJ", role: "공간술사", trait: "거리를 접어 상대를 끌고 밀어낸다.", color: "#60a5fa", ink: "#102a56", moveNames: ["청색 당김", "적색 튕김", "무한 회랑", "보랏빛 충돌", "거리 무효"] },
   { id: "skuna", name: "스쿠나", mark: "SK", role: "참격왕", trait: "빠른 선형 공격과 영역 압박에 특화됐다.", color: "#fb7185", ink: "#50131f", moveNames: ["해", "팔", "복마 난도", "불꽃 개방", "왕의 반격"] },
   { id: "block-pick", name: "네모난 곡괭이", mark: "PX", role: "광부", trait: "단단한 방어를 깨고 파편을 흩뿌린다.", color: "#38bdf8", ink: "#12354a", moveNames: ["철 곡괭이", "다이아 강타", "기반암 굴착", "광맥 폭주", "채굴 가속"] },
   { id: "block-axe", name: "네모난 도끼", mark: "AX", role: "벌목꾼", trait: "근접 돌진과 넓은 회전 공격이 강하다.", color: "#a78bfa", ink: "#35245b", moveNames: ["참나무 찍기", "회전 벌목", "삼림 붕괴", "도끼비", "나무 갑옷"] },

@@ -15,7 +15,7 @@ for (const fighter of FIGHTERS) {
 }
 
 const picks: RosterPick[] = [
-  { fighterId: "kojo", variant: "supercharged" },
+  { fighterId: "gojo", variant: "supercharged" },
   { fighterId: "skuna", variant: "flame" },
   { fighterId: "block-pick", variant: "classic" },
   { fighterId: "gravity-apple", variant: "frost" },

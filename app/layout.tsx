@@ -2,8 +2,8 @@ import type { Metadata } from "next";
 import "./globals.css";
 
 export const metadata: Metadata = {
-  title: "JBB Seed Arena",
-  description: "같은 시드는 같은 전투를 만든다. 50종 공 파이터의 결정론적 자동 전투 아레나.",
+  title: "JBB",
+  description: "50종 공 파이터를 직접 편성하고 같은 시드로 같은 전투를 재현하는 결정론적 배틀 게임.",
   other: { "codex-preview": "development" },
   icons: { icon: "/favicon.svg", shortcut: "/favicon.svg" },
 };
